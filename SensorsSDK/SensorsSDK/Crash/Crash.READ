@@ -1,0 +1,39 @@
+
+采集崩溃
+    两种场景：
+        NSException 异常
+        Unix 信号异常
+        
+    NSException 异常：
+            OC 代码抛出的异常。最常见的是通过 @throw 抛出的异常
+            
+            捕获 NSException 异常：
+               通过 NSSetUncaughtExceptionHandler 函数来全局设置异常处理函数，然后收集异常堆栈信息，并触发相应的事件（$AppCrashed），来实现 NSException 异常的全埋点
+               
+               传递 UncaughtExceptionHandler：
+                问题： 通过 NSSetUncaughtExceptionHandler 函数来全局设置异常处理函数，采集了崩溃事件（$AppCrashed).
+                   但是，在应用程序实际开发中，可能会集成多个SDK，如果这些SDK都采用这种方式采集异常信息，总有一些SDK采集不到异常信息。因为通过 NSSetUncaughtExceptionHandler 函数设置的是一个全局异常处理函数，后面设置的异常处理函数会自动覆盖前面设置的异常处理函数。
+                解决办法： 在调用 NSSetUNcaughtExceptionHandler 函数全局设置异常处理函数之前，先通过 NSGetUncaughtExceptionHandler 函数获取之前设置的异常处理函数并保存，在处理异常信息采集后，再主动调动已备份的处理函数（让所有的异常处理形成链条），即可解决上面提到的问题。
+                
+                新增 一个 NSUncaughtExceptionHandler 类型的属性 previousExceptionHandler，用来保存之前设置的异常处理函数
+                    sensorsdata_uncaught_exception_handler 函数中 触发 $AppCrashed 事件，并调用之前已设置的异常处理函数。
+                    
+                    通过这样的处理，即可把所有的异常处理函数形成链条，确保之前设置的异常处理函数的 SDK 也能采集到的异常信息。不过如果后面设置的异常处理函数的 SDK 没有有效地传递信息，可能也会导致无法采集到异常信息
+                   
+
+捕获信号：Exception Type 中有两个字段： EXC_BAD_ACCESS 和 SIGGEGV 分别置 Mach异常 和 Unix信号
+
+  Mach 是 Mac OS 和 iOS 操作系统的微内核，Mach 异常就是最底层的内合计异常。
+     iOS 系统中，每个 Thread、Task、Host 都有一个异常端口数据。可以通过设置 Thread、Task、Host 的异常端口来捕获 Mach 异常。Mach 异常会被转换成相应的 Unix 信号，并传递给出错的线程。
+     EXC_BAD_ACCESS (SIGGEGV) 意思是：Mach 层的异常 EXC_BAD_ACCESS 被转换成 SIGGEGV 信号并传递给出错的线程。
+     
+ 捕获 Unix 信号异常：
+     SensorsAnalyticsExceptionHandler 修改：
+        新增 Unix 信号的处理函数： sensorsdata_signal_exceptin_handler
+        在初始化方法中，注册信号处理函数
+        修改 trackAppCrashedWithException： 方法，当异常对象中没有堆栈信息时，就默认获取当前现场的堆栈信息（由于 Unix 信号异常对象是我们自己构建的，因此并没各有异常堆栈信息）
+
+
+采集应用程序异常时的 $AppEnd 事件
+    通过监听应用程序的状态（UIAPplicationDidEnterBackgroundNotification），实现 $AppEnd 事件全埋点。如果应用程序异常，就采集不到 $AppEnd 事件，会造成 $AppStart 和 $AppEnd 不成对。因此应用程序崩溃时要补发 $AppEnd 事件
+    在 -trackAppCrashedWithException：方法中补发

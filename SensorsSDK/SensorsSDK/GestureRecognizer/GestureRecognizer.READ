@@ -1,0 +1,13 @@
+
+抽象类 GestureRecognizer
+   手势识别器抽象类， 定义了一组手势识别器常见的行为，还支持通过设置委托（即实现 UIGestureRecognizerDelegate 协议的对象），对某些行为进行更细粒度的定制
+   使用 Target-Action 模式，手势识别器不会将消息交由 UIAPplication 对象来发送。无法通过响应者链的方式来实现手势操作全埋点
+
+手势全埋点
+UITapGestrueRecognizer UILongPressGestureRecognizer 全埋点
+  通过 Method Swizzling 在 UITapGestureRecognizer 类中添加  Target-Action 的方法，添加新的 Target-Action，并在新添加的 Action 中触发 $AppClick 事件，进而实现控件轻拍手势全埋点
+  在 UITapGestureRecognizer 类中用于添加 Target-Action 有两个：
+  -initWithTarget：action：
+  -addTarget：action：
+  
+  

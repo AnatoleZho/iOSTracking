@@ -1,0 +1,64 @@
+
+用户标识
+    对于唯一表示一个用户，要考虑两种场景
+    1.登陆之前标识
+    2.登录后标识
+    
+    登录前： 1. UDID （Unique Device Identifier 设备唯一标识符） 40位16进制序列
+                    iOS 5 之后保护用户隐私，不可取
+                    Xcode 中 Devices and Simulators 中获取； 蒲公英中 https://www.pgyer.com/uuid
+                    
+           2. UUID （Universally Unique Identifier 通用唯一标识符）32位16进制序列
+                    iOS 6 之后使用 NSUUID 获取
+                      // OC
+                      NSString *uuid = [NSUUID UUID].UUIDString;
+                      
+                      // CoreFoundation
+                      CFUUIDRef cfuuidRef = CFUUIDCreate(kCFAllocatorDefault);
+                      NSString *uuid = (NSString *)CFBridgingRelease(CFUUIDCreateString(kCFAllocatorDefault, cfuuidRef))
+                      // 如果不做存储，每次调用都会生成一个新的 UUID，因此不适合做 唯一标识
+                      
+          3. MAC 地址  12位16进制序列  iOS 7 之后进制获取 MAC 地址
+          
+          4. IDFA （Identifier For Advertising， 广告标识符）主要用于广告推广、换量等跨应用设备追踪  32位16进制序列
+                   同一设备，同一时刻， 所有应用程序获取的 IDFA 都是相同的
+            
+                    iOS 6 开始 利用 AdSupport.framework 库提供的方法来获取 IDFA
+                    #import <AdSupport/AdSupport.h>
+                    BOOL isLimitAdTracking = [[ASIdentifierManager sharedManager] isAdvertisingTrackingEnabled];
+                    NSString *idfa = [[[ASIdentifierManager sharedManager] advertisingIdentifier] UUIDString];
+                    // IDFA 并不是固定不变的, 下列设置会生成一个新的
+                        1. 设置通用还原，抹掉所有内容设置
+                        2. 通过 iTunes 还原设备
+                        3. 设置隐私广告，限制广告追踪
+                        
+         5. IDFV （Identifier For Vender 应用开发商标识符） 用于用户开发商（Vender）表示用户，适用于分析用户在应用中的行为等   32位16进制序列
+             每个 iOS 设备在所属同一个 Vender 的应用里，获取到的 IDFV 是相同的
+             与 IDFA 相比 IDFV 不会出现获取不到的情况，如果应用程序卸载，IDFV 将会被重置
+             // 下列操作也会重置 IDFV
+                1. 设置通用还原，抹掉所有内容设置
+                2. 通过 iTunes 还原设备
+                3. 设置隐私广告，限制广告追踪
+          NSString *idfv = [[[UIDevice currentDevice] identifierForVender] UUIDString];
+          
+          6. IMEI (International Mobile Equipment Identity 国际移动设备身份码) 15 位纯数字串，全球唯一
+              iOS 5 之后不允许获取
+              
+    
+最佳实践： 都有优缺点，无法保证唯一性，受相关政策限制
+     方案一： 常规数据分析中 iOS 设备ID按照以下优先级： IDFA -> IDFV -> UUID
+     1. SensorsAnalyticsSDK.h 新增一个 anonymousId 属性 用于保存设备 ID
+     2. SensorsAnalyticsSDK.h  新增 saveAnonymousId: 方法
+     
+     方案二： 对于设备ID 不管是 IDFA 还是 IDFV 限制追踪或是卸载都可能导致发生改变
+         使用 Keychain
+        Keychain 安全机制是从系统层面上保证了存储的敏感信息不会被非法读取或者窃取
+        特点：1. 保存在 Keychain 中数据，即使应用卸载 数据仍然在，重新安装还可以读取这些数据
+             2. Keychain 中的数据可以通过 Group 方式实现应用间共享，只要应用程序有相同的 TeamID 即可
+             3. Keychain 中数据是经过加密的，因此非常安全
+        
+        使用 SensorsAnalyticsKeychainItem 工具类
+        
+        
+    登录之后：用户登录之后用系统中的 用户ID
+     

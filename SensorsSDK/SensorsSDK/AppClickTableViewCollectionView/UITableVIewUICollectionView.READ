@@ -1,0 +1,87 @@
+
+UITableView 和 UICOllectionView 都是直接继承自 UIView类， 因此之前的埋点不适用
+实现 UITableView 和 UICOllectionView 全埋点，常见解决方案有 三种：
+1. 方法交换
+2. 动态子类
+3. 消息转发
+
+支持 UITableView
+
+方案一： 方法交换
+    使用 Method Swizzling 交换 -tableView：didSelectRowAtIndexPath: 方法来实现 UITableView 控件 $AppClick 事件埋点
+    思路：首先，使用 Method Swizzling 交换 UITableView 的 —setDelegate: 方法；然后获取实现 UITableViewDelegate 协议的 delegate 对象，在得到  delegate 对象之后，交换 delegate 对象的 -tableView:didSelectAtIndexPath: 方法； 最后，在交换后的方法中触发 $AppClick 事件，从而实现 UITableView 控件 $AppClick 事件全埋点
+    
+    
+    UITableView 的 delegate 是在程序运行时设置的，因此，只能动态地给 delegate 对象添加需要交换的方法，然后与原来的 -tableView:didSelectRowAtIndexPath: 方法进行交换
+    
+    sensorsdata_tableViewDidSelectRow(id, SEL, UITableView, NSIndexPath) 函数就是要添加的交换方法的实现
+    
+    IMP 类型的定义
+    typedef void (*IMP)(void /* id, SEL, ... */);
+    typedef id _Nullable (*IMP)(id, _Nonnull, SEL _Nonnull, ...);
+    
+    IMP 类型的函数中有两个默认参数，第一个传入调用某个方法的对象或者类，第二个参数是方法名
+
+
+方案二： 动态子类
+    在运行时，给实现了 UITableViewDelegate 协议的 -tableView:didSelectRowAtIndexPath: 方法的类创建一个子类，让该子类的对象变成我们创建的子类的对象，同时，在创建子类中动态添加 -tableView:didSelectRowAtIndexPath: 方法。
+    那么，点击 cell 控件时，就会先运行自己创建的子类中的 -tableView:didSelectRowAtIndexPath: 方法。 在实现该方法的时候，先调用 delegate 原来的方法实现，再触发 $AppClick 事件，即可实现全埋点
+    
+    1. 创建一个动态添加子类的工具类 SensorsAnalyticsDynamicDelegate
+    2. SensorsAnalyticsDynamicDelegate.m 文件中添加  tableView:didSelectRowAtIndexPath: 方法
+    3. 在 SensorsAnalyticsDynamicDelegate 类中 添加 +proxyWithTableViewDelegate 类方法
+
+    问题：     "$screen_name" : "cn.SensorsData.ViewController"
+    解决： 在生成的子类中，重写该子类的 class 方法，让该方法返回原始子类
+        SensorsAnalyticsDynamicDelegate.m 文件中添加  -sensorsdata_class 方法
+        修改 SensorsAnalyticsDynamicDelegate 类中 +proxyWithTableViewDelegate 类方法 中 给动态子类 添加 class 方法
+
+
+方案三： 消息转发
+    NSProxy 类
+    iOS中，自定义类一般继承自 NSObject 类或者其子类。但是 NSProxy 类不是继承自 NSObject 类或者其子类，而是一个实现了 NSObject 协议的抽象基类
+    NSProxy 作为一个委托代理对象，将消息转发给一个真实的对象或是自己加载的对象
+    
+    测试类： 实现一个能同时调用 NSMutableString 和 NSMutableArray 两个类中的方法的委托类，模拟多继承
+    
+    创建 TargetProxy 类 继承自 NSProxy 类，并实现一个初始化方法
+        TargetProxy.m 中 重写 -methodSignatureForSelector： 方法（获取真是对象的方法签名）
+                         重写 -forwardInvocation： 方法（调用真是对象的方法）
+    
+    在 ViewController 中 用 -testTarget 测试
+
+    大部分情况下，使用 NSObject 类也可以实现消息转发，实现方式与 NSProxy 类相同。但是大部分情况下使用 NSProxy 类更为合适，理由：
+    1. NSProxy 类实现了包括 NSObject 协议在内基类所需的基础方法
+    2. 通过 NSObject 类实现的代理类不会自动转发 NSObject 协议中的方法
+    3. 通过 NSObject 类实现的代理类不会自定转发 NSObject 类别中的方法。例如 -valueForKey: 方法，如果是使用 NSObject 类实现的代理类，会抛出异常。
+    
+    使用消息转发 实现 TableView 全埋点
+    1. 创建 SensorsAnalyticsDelegateProxy 类（继承自 NSProxy 类），实现 UITableViewDelegate 协议。然后添加一个类方法 +ProxyWithTableViewDelegate：
+    2. 重写 -methodSignatureForSelector： 方法，返回 delegate 对象中对应的方法签名
+       重写 -forwardInvocation： 方法，将消息转发给 delegate 对象执行，并触发 $AppClick 事件
+       
+    3. 修改 UITableView+SensorsData.m 中 -sensorsdata_setDelegate: 方法，在该方法中创建委托对象，并将其设置为 UITableView 控件的 delegate
+    4.  为 UITableView 控件添加扩展属性 sensorsdata_delegateProxy , 用于保存创建的委托对象。因为 如果 proxy 为 临时变量，将其设置 UITableView 的 delegate 对象，delegate 属性为 weak ，当方法结束之后就释放
+        为了同时支持 UICollectionView 直接扩展到 UIScrollVIew 中 UIScrollView+SensorsData
+
+
+    获取 显示内容 $element_content
+     修改 UIView+SensorsData.m 中 -sensorsdata_elementContent
+     
+    获取 显示内容 $element_position
+    获取 indexPath 的 row 和 section
+方案比较：
+    方案一：方法交换
+         优点：简单、易理解；Method Swizzling 属于成熟技术，性能相对来说较高
+         缺点：对原始类有入侵，易造成冲突
+    
+    方案二： 动态子类
+         优点：没有对原始类入侵，不会修改原有类方法，不会和第三方库冲突，是一个稳定的方案
+         缺点：动态创建子类对性能和内存有比较大的消耗
+    
+    方案三： 消息转发
+         优点：充分利用消息转发机制，对消息进行拦截，性能较好
+         缺点：容易与一些同样适用消息转发进行拦截的第三方库冲突， 例如 ReactiveCocoa
+支持 UICollectionView
+按方案三 实现
+

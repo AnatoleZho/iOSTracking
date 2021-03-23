@@ -1,0 +1,29 @@
+
+APP 与 H5 打通： H5 集成 JavaScript 数据采集 SDK 后，H5触发事件不直接同步给服务端，而是先发送给 APP 端数据采集 SDK ，经 APP 端数据SDK 二次加工处理后存入本地缓存在进行同步
+
+原因：
+    1. 数据丢失率：H5采集数据由于缓存、网络、切换页面等原因，数据丢失率在 5% 左右，APP 端采集数据丢失率一般在 1% 左右，打通 APP 和 H5 可以降低丢失率
+    2.数据准确性： H5 无法直接获取设备相关信息，只能通过解析 UserAgent 值获取有限的信息，面临至少两个问题：
+                 (1). 有些信息通过解析 UserAgent 根本获取不到，比如应用版本号等
+                 (2). 有些信息通过解析 UserAgent 获取到,但是内容可能不正确
+                 APP 端数据采集SDK 可以补充这些信息，可以保证数据的准确性和完整性
+    3.用户标识： APP 登录之前，一般用匿名ID 来标识 用户，APP 端有 IDFA 和 IDFV， H5 一般用 Cookie ，导致一个用户
+               出现两个匿名ID情况。 打通之后 保证 匿名ID 归化为一。
+               
+打通方案：
+        1. 通过拦截 WebView 请求进行打通
+        2. 通过 JS 和 原生相互调用 进行打通
+        
+ 
+方案一：
+     拦截请求： 区分 APP 端的 还是 Safari 浏览器显示： 借助 UserAgent 来进行判断，当 H5 在 APP 端显示时，可以通过当前的         UserAgent 上追加 一个特殊标记（/sa-sdk-ios）,进而告知 JS SDK 当前 H5 是在 APP 端显示并需要进行打通
+ 
+      1. 修改 UserAgent
+      2. 是否拦截
+      3. 二次加工 H5 事件
+      
+ 拦截： WKWebview 空间有一个 navigationDelegate 属性，设置该属性的对象需要实现 WKNavigationDelegate 协议。实现这个协议的方法有很多，其中 -webView:decidePolicyForNavigationAction:decisionHandler: 方法，可以在这个方法中进行请求拦截
+
+方案二：
+   原理：
+      在 WKWebview 初始化之后，通过调用 WebView.configuration.userContentController 的 -addScriptMessageHandler:name 方法注册回调，然后实现 WKScriptMessageHandler 协议中的 -userContentController: didReceiveScriptMessage: 方法， JavaScript SDK 通过 window.webkit.messageHandler.<name>.postMessage(<messageBody>) 方式触发事件，就能通过回调接收消息，然后从消息中解析事件信息，再调用SensorsAnalyticsSDK 的 trackFromH5WithEvent: 方法即可实现。

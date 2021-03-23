@@ -1,0 +1,4 @@
+通过 UIViewController 的整个生命周期，当执行到 -viewDidAppear： 方法时，表示视图已经在屏幕上渲染完成，即页面已经显示出来，等待用户的下一步操作。
+因此 执行到 -viewDidAppear： 方法的时间点是触发页面浏览事件的最佳时机
+
+对于 UIInputWindowController，UINavigationController， UIAlertcontroller 不希望触发页面浏览事件，可以引入黑名单机制

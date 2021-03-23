@@ -1,0 +1,41 @@
+
+
+Runtime 中 一个类使用一个名为 objc_class 的结构体表示
+
+strct objc_class {
+    // objc_method_list 类型指针，保存当前类的所有方法列表
+    struct objc_method_list *_Nullable * _Nullable methodLists
+}
+
+objc_method_list  也是一个结构体
+
+struct objc_method_list {
+
+    struct objc_method method_list[1]
+}
+
+struct objc_method {
+    SEL _Nonnull method_name        // 方法名
+    char * _Nullable method_types   // 方法类型
+    IMP _Nonnull method_imp         // 方法实现
+}
+
+
+使用 Method Swizzing 交换方法，其实就是修改 objc_method 结构体中的 method_imp， 即改变 method_name  和 method_imp 的映射关系
+
+实现 Method Swizzing 的相关函数
+
+1. 返回目标类 aClass、方法名 aSelector 的实例方法
+Method class_getInstanceMethod(Class _Nullable aClass, SEL _Nullabel aSelector)
+
+2. 给 目标类 aClass 添加一个新的方法，同时包含方法的实现
+BOOL class_addMethod(Class _Nullable aClass, SEL _Nonnull sSelector, IMP _ Nonnull imp, const char * _Nullable types)
+
+3. 返回方法的实现指针
+IMP method_getImplementation(Method _Nullnull method)
+
+4. 替换目标类 aClass 的 aSelector 方法的指针
+IMP class_replaceMethod(Class _Nullabel aClass, SEL _Nonnull aSelector, IMP _Nonnull imp, const char* _Nullable types)
+
+5. 交换两个方法的实现指针
+void method_exchangeImplementations(Method _Nonnull m1, Method _Nonnull m2)

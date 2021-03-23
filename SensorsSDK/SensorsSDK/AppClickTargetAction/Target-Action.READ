@@ -1,0 +1,92 @@
+
+Target - Action 也叫 目标 - 动作模式：
+    当某个事件发生的时候，调用特定对象的特定方法
+    Target: 可以使任意类型的对象。在iOS 程序中一般会是一个控制器
+    Action: 必须符合以下几种类型之一
+        1. - (void)doSomething;
+        2. - (void)doSomething: (id)sender;
+        3. - (void)doSomething: (id)sender forEvent: (UIEvent *)event;
+        4. - (IBAction)doSomething;
+        5. - (IBAction)doSomething: (id)sender;
+        6. - (IBAction)doSomething: (id)sender forEvent: (UIEvent *)event;
+        // IBAction 作为返回值类型，是为了让 Action 能在 Interface Builder 中被看到
+    
+代码方式添加 Target-Action, 一个控件可以添加多个 Target-Action
+    当 target 为 nil 会默认先在 self 里面查找方法，如果没有 应用程序会在响应链中搜索定义了该方法的对象，然后执行该方法
+- (void)addTarget:(nullable id)target action:(SEL)action forControlEvents:(UIControlEvents)controlEvents;
+
+
+方案一：
+    通过 Target-Action 模式可知，执行 Action 之前，会通过控件和 UIApplication 对象发送事件相关信息
+    因此可通过 Method Swizzling 交换 UIApplication 中的 -sendAction：to: from: ForEvent: 方法，然后在交换后的方法中 触发 $AppClick 事件，并根据 target 和 sender 采集相关属性，实现 $AppClick 事件全埋点
+    - (BOOL)sendAction:(SEL)action to:(nullable id)target from:(nullable id)sender forEvent:(nullable UIEvent *)event;
+
+采集其他相关信息：
+    1. 控件类型（$element_type）
+    2. 控件上显示的文本 （$element_content）
+    3. 控件所属页面 （$screen_name）
+    
+    
+为提高扩展性，将  UIApplication+SensorsData.m 中 - (BOOL)sensordata_sendAction:(SEL)action to:(id)target from:(id)sender forEvent:(UIEvent *)event 的方法逻辑抽离到  SensorsAnalyticsSDK 类的 - (void)trackAppClickWithView: (UIView *)view properties: (nullable NSDictionary<NSString *, id> *)properties;
+
+   A. 控件类型 和 控件上显示的文本：通过 UIView+SensorData 中添加的属性获取
+   B. 获取控件所属页面： 借助于 UIResponder
+           UIResponder 类是 iOS应用程序中专门用来响应用户操作事件的，比如：
+           * Touch Events 触摸事件
+           * Motion Events 运动事件
+           * Remote Control Events 远程控制事件
+           
+           UIApplication, UIViewController， UIView 都是 UIResponder 的子类，因此都有响应以上事件的能力，
+           以上类的子类 也都有响应事件的能力。这些类的对象也都是响应者，这些响应者形成一个响应者链。
+           一个完整的响应者链传递规则如果下：
+           UIView -> UIViewController -> UIWindow -> UIApplication -> UIApplicationDelegate
+           
+           对于任意一个视图来说，都能通过响应者链找到其所在的视图控制器，即所属的页面
+    
+    
+    支持更多控件：
+    1. 支持 获取 UISwitch 控件文本信息
+       解决方案： 当 UISwitch 控件的 on 属性为 YES时，文本为 checked； 当 UISwitch 控件的 on 属性为 NO 时，文本为 unchecked
+        
+    2. 滑动 UISilder 控件重复触发 $AppClick 事件解决方案
+        滑动 UISilder 控件过程中，系统会依次触发 UITouchPhaseBegan， UITouchPhaseMoved，UITouchPhaseMoved ... UITouchPhaseEnded 事件,每个事件都会触发 $AppClick 事件
+        解决方案：  优化 - (BOOL)sensordata_sendAction:(SEL)action to:(id)target from:(id)sender forEvent:(UIEvent *)event，指明只在触发 UITouchPhaseEnd 时才触发
+
+       UISlider 的 Value 属性值作为 $element_content 的属性值
+
+    3. UISegmentedControl, UIStepper 显示的文本内容
+       UISegmentedControl, UIStepper 空间被点击时，有一个非常特殊的地方，即 event 为 nil
+
+
+方案二：
+   当一个视图被添加到父视图上时，系统会自动调用 -didMoveToSuperview 方法。因此，可以通过 Method Swizzling 交换 UIView 的 -didMoveToSuperview 方法，然后在交换方法里给控件添加一组 UIControlEventTouchDown 类型的 Target-Action， 并在 Action 里 触发 $AppClick 事件，从而实现全埋点
+   在 UIControl 类别中实现
+   
+  注释掉 UIApplication+SensorsData.m 中的 +load 方法，将方案一 实现注释掉
+  
+  运行发现崩溃：
+     UIControl 类中其实没有实现 -didMoveToSuperview 方法，这个方法是从 其父类 UIView 继承而来的。 因此，实际上交换的是 UIView 的  -didMoveToSuperview 方法。当 UIView 调用  -didMoveToSuperview 方法时，其实调用的是 在 UIControl+SensorData.m 中实现的 - (void)sensorsdata_didMoveToSuperview；
+     但是， UIView 对象或除了 UIControl 类的其他 UIView 子类的对象，在 执行 -didMoveToSuperview 方法时，并没有实现
+     - (void)sensorsdata_didMoveToSuperview；方法，因此，程序出现找不到方法而崩溃情况
+  解决方案：
+    修改 NSObject+SASwizzler.m 中 + (BOOL)sensorsData_swizzleMethod:(SEL)originalSEL withMethod:(SEL)alternateSEL 方法，将其修改为： 在方法交换之前，先将当前类中添加需要交换的方法，并在添加成功之后获取新的方法指针
+    
+ 
+  并不是所有的控件都要采集它的 $AppClick 事件信息，在 UIControl+SensorData.m 新增 - (BOOL)sensorsdata_isAddMultipleTargetActions 方法，用来判断是否要触发 $AppClick 事件
+  
+  
+  支持更多控件：
+   1.支持 UISwitch，UISegmentControl，UIStepper 控件
+    这些控件不响应 UIControlEventTouchDown 类型的 Action，实际上这些控件添加的是 UIControlEventValueChanged 类型的 Action
+    解决方案： 修改 UIControl+SensorData.m - (void)sensorsdata_didMoveToSuperview； 方法 ，若是 UISwitch，UISegmentControl，UIStepper 控件 ，则添加 UIControlEventValueChanged 类型的 Target - Action
+        否则添加 UIControlEventTouchDown 类型的
+    2. 支持 UISlider 控件
+     目前添加的 UIControlEventTouchDown 类型的 Action 会导致只点击而没有滑动 UISlider 时， 触发 $AppClick 事件
+     需要也给 UISlider 添加 UIControlEventValueChanged 类型的 Action, 还要保证只有手抬起时才触发 触发 $AppClick 事件
+     
+        修改 UIControl+SensorData.m 新增- (void)sensorsdata_valueChangeAction: (UIControl *)sender event: (UIEvent *)event 方法
+
+ 
+ 方案比较：
+  方案一： 如果给一个控件添加多个 Target - Action , 会导致多次触发 $AppClick 事件
+  方案二： 由于 SDK 为控件添加了一个默认触发类型的 Action，因此，如果 开发过程中使用 UIControl 类的 allTargets 或者 allControlEvents 属性进行逻辑判断，有可能引入一些无法预料的问题            
